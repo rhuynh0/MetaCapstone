@@ -5,3 +5,4 @@ fastapi
 uvicorn
 tqdm
 python-multipart
+xgboost
