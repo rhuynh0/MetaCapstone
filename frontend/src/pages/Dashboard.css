@@ -1,0 +1,231 @@
+/* Dashboard.css
+  This file uses Tailwind's @apply directive.
+  Ensure your build process (e.g., via PostCSS) is configured to handle this.
+*/
+
+.dashboard-container {
+  @apply min-h-screen bg-gray-50 text-gray-900;
+}
+.dashboard-content {
+  @apply max-w-7xl mx-auto p-6;
+}
+.dashboard-header {
+  @apply flex items-center justify-between mb-6;
+}
+.header-title-group {
+  @apply flex items-center gap-4;
+}
+.header-icon {
+  @apply w-12 h-12 rounded-2xl bg-gray-200 flex items-center justify-center text-xl font-semibold;
+}
+.header-title {
+  @apply text-2xl font-semibold;
+}
+.header-subtitle {
+  @apply text-sm text-gray-600;
+}
+.header-model-info {
+  @apply flex items-center gap-3;
+}
+.model-info-text {
+  @apply text-right text-sm;
+}
+.model-label {
+  @apply font-medium;
+}
+.model-version {
+  @apply text-gray-500;
+}
+.settings-button {
+  @apply px-4 py-2 rounded-xl border border-gray-200 bg-white text-sm;
+}
+.main-grid {
+  @apply grid grid-cols-12 gap-6;
+}
+
+/* Input Panel */
+.input-panel {
+  @apply col-span-4 bg-white rounded-2xl p-5 shadow-sm;
+}
+.panel-title {
+  @apply font-semibold mb-3;
+}
+.panel-description {
+  @apply text-sm text-gray-600 mb-4;
+}
+.form-label {
+  @apply block text-sm font-medium mb-1;
+}
+.text-input {
+  @apply w-full rounded-lg border p-2 mb-3;
+}
+.file-input {
+  @apply mb-2;
+}
+.file-status {
+  @apply text-sm text-gray-500 mb-4;
+}
+.textarea-input {
+  @apply w-full rounded-lg border p-2 h-28 mb-3;
+}
+.slider-control {
+  @apply flex items-center gap-2 mb-3;
+}
+.control-label {
+  @apply text-sm;
+}
+.slider {
+  @apply flex-1;
+}
+.slider-value {
+  @apply w-14 text-right;
+}
+.number-control {
+  @apply flex items-center gap-2 mb-4;
+}
+.number-input {
+  @apply w-20 rounded-lg border p-1 ml-2;
+}
+.button-group {
+  @apply flex gap-2;
+}
+.run-button {
+  @apply flex-1 rounded-xl bg-teal-600 text-white px-4 py-2 font-medium disabled:opacity-60;
+}
+.clear-button {
+  @apply rounded-xl border px-4 py-2;
+}
+.settings-section {
+  @apply mt-4 border-t pt-3 text-sm text-gray-600;
+}
+.section-label {
+  @apply mb-1;
+}
+.section-title {
+  @apply mb-1 font-medium;
+}
+.section-subtitle {
+  @apply text-xs mb-2;
+}
+.checkbox-control {
+  @apply flex items-center gap-2;
+}
+.checkbox-label {
+  @apply text-sm;
+}
+
+/* Output Panel */
+.output-panel {
+  @apply col-span-8 bg-white rounded-2xl p-5 shadow-sm flex flex-col;
+}
+.output-header {
+  @apply flex items-start justify-between mb-4;
+}
+.export-buttons {
+  @apply flex gap-2;
+}
+.export-button {
+  @apply px-4 py-2 rounded-xl border;
+}
+.output-content {
+  @apply flex-1 overflow-y-auto;
+}
+.output-placeholder {
+  @apply p-6 text-center text-gray-500;
+}
+.output-results {
+  @apply space-y-4;
+}
+.results-meta {
+  @apply flex items-center justify-between bg-gray-50 p-3 rounded-lg border;
+}
+.meta-label {
+  @apply text-sm text-gray-500;
+}
+.meta-value {
+  @apply font-medium;
+}
+.meta-value-sm {
+  @apply text-sm;
+}
+.category-list {
+  @apply grid grid-cols-1 gap-3;
+}
+.category-item {
+  @apply p-4 rounded-lg border;
+}
+.category-header {
+  @apply flex items-start justify-between;
+}
+.category-title-group {
+    @apply flex items-baseline gap-3;
+}
+.category-name {
+  @apply font-semibold text-lg;
+}
+.category-likelihood {
+  @apply text-sm text-gray-500;
+}
+.product-list {
+  @apply mt-3 space-y-2;
+}
+.product-item {
+  @apply flex items-center gap-3;
+}
+.product-name {
+  @apply w-48 text-sm;
+}
+.progress-bar-container {
+  @apply flex-1 bg-gray-100 rounded-full h-3 overflow-hidden;
+}
+.progress-bar {
+  @apply h-3 rounded-full bg-gradient-to-r from-teal-400 to-slate-500;
+}
+.product-likelihood {
+  @apply w-14 text-right text-sm;
+}
+.category-actions {
+  @apply w-48 text-right;
+}
+.actions-label {
+  @apply text-sm text-gray-500;
+}
+.action-buttons {
+  @apply mt-2 flex flex-col gap-2;
+}
+.action-button {
+  @apply text-sm rounded-lg border px-3 py-1;
+}
+.explanation-details {
+  @apply mt-3 text-sm text-gray-600;
+}
+.explanation-summary {
+  @apply cursor-pointer font-medium;
+}
+.explanation-list {
+  @apply mt-2 list-disc pl-5;
+}
+.raw-output-section {
+  @apply mt-4;
+}
+.raw-output-label {
+  @apply text-sm text-gray-500 mb-2;
+}
+.raw-output-pre {
+  @apply bg-gray-900 text-white rounded-lg p-4 text-xs overflow-auto max-h-48;
+}
+.output-footer {
+  @apply mt-4 border-t pt-3 flex items-center justify-between text-sm text-gray-600;
+}
+.footer-value {
+  @apply font-medium;
+}
+.footer-note {
+  @apply text-right;
+}
+.footer-note-details {
+  @apply text-xs text-gray-500;
+}
+.dashboard-footer {
+  @apply mt-6 text-center text-xs text-gray-500;
+}
