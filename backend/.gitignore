@@ -1,0 +1,2 @@
+# Ignore the models directory and its contents (relative to this backend/ folder)
+models/
