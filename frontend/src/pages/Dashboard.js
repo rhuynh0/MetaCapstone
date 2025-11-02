@@ -11,79 +11,78 @@ export default function Dashboard() {
   const [explain, setExplain] = useState(true);
   const [apiKey, setApiKey] = useState("");
 
-  // Mock inference engine (client-side simulation)
-  function mockPredict() {
-    return {
-      meta: {
-        user_pseudonym: userId,
-        timestamp: new Date().toISOString(),
-        model_version: "v0.9.1-demo",
-      },
-      categories: [
-        {
-          name: "Electronics",
-          likelihood: 0.68,
-          products: [
-            { name: "Laptop", likelihood: 0.45 },
-            { name: "Wireless Earbuds", likelihood: 0.3 },
-            { name: "Gaming Monitor", likelihood: 0.23 },
-          ],
-          explanation: [
-            "recent visits to laptop comparison pages",
-            "searches: best gaming monitor",
-          ],
-        },
-        {
-          name: "Travel",
-          likelihood: 0.42,
-          products: [
-            { name: "Flights", likelihood: 0.28 },
-            { name: "Hotels", likelihood: 0.25 },
-            { name: "Rental Cars", likelihood: 0.19 },
-          ],
-          explanation: [
-            "multiple hotel price lookups",
-            "visited airline sites",
-          ],
-        },
-        {
-          name: "Fitness",
-          likelihood: 0.35,
-          products: [
-            { name: "Running Shoes", likelihood: 0.2 },
-            { name: "Smartwatch", likelihood: 0.1 },
-            { name: "Yoga Mat", likelihood: 0.05 },
-          ],
-          explanation: [
-            "viewed running shoe reviews",
-            "searched: smartwatch features",
-          ],
-        },
-      ],
-    };
+  // Parse uploaded CSV file and extract URLs
+  function parseCSV(text) {
+    const lines = text.split('\n').filter(Boolean);
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const urlIdx = headers.findIndex(h => h.toLowerCase().includes('url'));
+    if (urlIdx === -1) return [];
+    return lines.slice(1)
+      .map(line => line.split(',')[urlIdx]?.replace(/"/g, '').trim())
+      .filter(Boolean);
   }
 
+  const [uploadedURLs, setUploadedURLs] = useState([]);
   function handleFileUpload(e) {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     setUploadedFileName(f.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      let urls = [];
+      if (f.name.endsWith('.csv')) {
+        urls = parseCSV(event.target.result);
+      } else if (f.name.endsWith('.json')) {
+        try {
+          const data = JSON.parse(event.target.result);
+          if (Array.isArray(data)) {
+            urls = data.map(row => row.url).filter(Boolean);
+          }
+        } catch {}
+      }
+      setUploadedURLs(urls);
+    };
+    reader.readAsText(f);
   }
 
-  function runInference() {
+  async function runInference() {
     setProcessing(true);
     setOutput(null);
-    setTimeout(() => {
-      const raw = mockPredict();
+    try {
+      // Call the category-based prediction endpoint
+      const response = await fetch("http://localhost:8000/predict-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await response.json();
+      
+      // Filter and format results
       const filtered = {
-        meta: raw.meta,
-        categories: raw.categories
-          .map((c) => ({ ...c, likelihood: Number(c.likelihood.toFixed(2)) }))
+        meta: data.meta || {
+          user_pseudonym: userId,
+          timestamp: new Date().toISOString(),
+          model_version: "backend-categories",
+        },
+        categories: (data.categories || [])
+          .map((c) => ({ 
+            ...c, 
+            likelihood: Number(c.likelihood.toFixed(2)),
+            products: (c.products || []).map(p => ({
+              ...p,
+              likelihood: Number(p.likelihood.toFixed(3))
+            }))
+          }))
           .filter((c) => c.likelihood >= threshold)
           .slice(0, topK),
       };
       setOutput(filtered);
+    } catch (err) {
+      console.error("Prediction error:", err);
+      setOutput({ meta: { error: "Prediction failed: " + err.message }, categories: [] });
+    } finally {
       setProcessing(false);
-    }, 600);
+    }
   }
 
   function downloadJSON() {

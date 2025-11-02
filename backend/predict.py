@@ -153,6 +153,8 @@ def generate_interest_profile():
     print("\n--- User Interest Profile ---")
     print(json.dumps(final_output, indent=2))
     print("---------------------------\n")
+    
+    return final_output
 
 if __name__ == "__main__":
     generate_interest_profile()

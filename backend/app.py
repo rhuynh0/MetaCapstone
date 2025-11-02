@@ -1,6 +1,7 @@
 # small FastAPI app for future integration
 # app.py
 from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
 import os
@@ -14,6 +15,15 @@ meta = joblib.load(os.path.join(MODELS_DIR, "meta.pkl"))
 threshold = meta.get("frecency_threshold", None)
 
 app = FastAPI(title="URL Interest Predictor")
+
+# Add CORS middleware to allow frontend requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class PredictRequest(BaseModel):
     urls: List[str]
@@ -43,3 +53,16 @@ async def predict_from_csv(file: UploadFile = File(...)):
         return {"error": "CSV must include 'url' column"}
     urls = df["url"].astype(str).tolist()
     return await predict(PredictRequest(urls=urls))
+
+# Advanced prediction endpoint with categories
+@app.post("/predict-categories")
+async def predict_categories():
+    """
+    Generate category-based interest profile using predict.py logic
+    """
+    try:
+        import predict
+        result = predict.generate_interest_profile()
+        return result
+    except Exception as e:
+        return {"error": f"Category prediction failed: {str(e)}"}
