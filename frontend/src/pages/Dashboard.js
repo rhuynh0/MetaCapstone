@@ -6,6 +6,7 @@ export default function Dashboard() {
   const [userId, setUserId] = useState("user_12345");
   const [output, setOutput] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [jobStatus, setJobStatus] = useState(null);
   const [threshold, setThreshold] = useState(0.05);
   const [topK, setTopK] = useState(5);
   const [explain, setExplain] = useState(true);
@@ -24,6 +25,7 @@ export default function Dashboard() {
   }
 
   const [uploadedURLs, setUploadedURLs] = useState([]);
+  const [inlineSample, setInlineSample] = useState("");
   function handleFileUpload(e) {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
@@ -49,11 +51,72 @@ export default function Dashboard() {
   async function runInference() {
     setProcessing(true);
     setOutput(null);
+    setJobStatus({ status: 'starting', message: 'Initializing retrain...' });
     try {
-      // Call the category-based prediction endpoint
+      // If no uploaded data, prompt user and emit console messages for a short time
+      if ((!uploadedURLs || uploadedURLs.length === 0) && !inlineSample) {
+        console.warn("No file or inline sample provided. Please upload a CSV/JSON with a 'url' column or paste a sample.");
+        // show lightweight console 'processing' messages for ~2 seconds to give the user time
+        console.log("Waiting for input... (upload a file or paste sample in the text area)");
+        await new Promise((resolve) => {
+          console.log("Tip: upload a CSV with a 'url' column to run category predictions.");
+          setTimeout(() => {
+            console.log('Still waiting...');
+            setTimeout(resolve, 1000);
+          }, 800);
+        });
+        setProcessing(false);
+        return;
+      }
+
+      // Prepare request payload: prefer uploaded file urls, otherwise try inline sample
+      let payload = null;
+      if (uploadedURLs && uploadedURLs.length > 0) {
+        payload = { urls: uploadedURLs };
+      } else if (inlineSample) {
+        try {
+          const parsed = JSON.parse(inlineSample);
+          if (Array.isArray(parsed)) {
+            payload = { urls: parsed.map((r) => r.url).filter(Boolean) };
+          }
+        } catch (e) {
+          // not JSON - leave payload null so backend will fallback
+          console.warn('Inline sample could not be parsed as JSON; sending no payload so backend may use history fallback.');
+        }
+      }
+
+      // Start retraining asynchronously via /retrain, then poll job status
+      const retrainResp = await fetch('http://localhost:8000/retrain', { method: 'POST' });
+      const retrainJson = await retrainResp.json();
+      const jobId = retrainJson.job_id;
+      setJobStatus({ status: 'queued', message: 'Training queued', jobId });
+
+      // Poll job status until succeeded/failed
+      let finalStatus = null;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const stResp = await fetch(`http://localhost:8000/job-status/${jobId}`);
+        const stJson = await stResp.json();
+        setJobStatus(stJson);
+        if (stJson.status === 'succeeded') {
+          finalStatus = 'succeeded';
+          break;
+        }
+        if (stJson.status === 'failed') {
+          finalStatus = 'failed';
+          break;
+        }
+      }
+
+      if (finalStatus !== 'succeeded') {
+        throw new Error('Training failed: ' + (jobStatus && jobStatus.message));
+      }
+
+      // Training succeeded — now call predict-categories (no retrain flag)
       const response = await fetch("http://localhost:8000/predict-categories", {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
       });
       const data = await response.json();
       
@@ -82,6 +145,7 @@ export default function Dashboard() {
       setOutput({ meta: { error: "Prediction failed: " + err.message }, categories: [] });
     } finally {
       setProcessing(false);
+      setJobStatus(null);
     }
   }
 
@@ -185,6 +249,8 @@ export default function Dashboard() {
             <textarea
               placeholder='[ {"url": "https://example.com/product/123", "timestamp": "2025-09-28T10:00:00Z" } ]'
               className="textarea-input"
+              value={inlineSample}
+              onChange={(e) => setInlineSample(e.target.value)}
             />
 
             <div className="slider-control">
@@ -221,10 +287,13 @@ export default function Dashboard() {
               >
                 {processing ? "Processing…" : "Run Prediction"}
               </button>
+              {/* jobStatus is shown in the output panel placeholder; no duplicate needed here */}
               <button
                 onClick={() => {
                   setOutput(null);
                   setUploadedFileName(null);
+                  setUploadedURLs([]);
+                  setInlineSample("");
                 }}
                 className="clear-button"
               >
@@ -293,7 +362,14 @@ export default function Dashboard() {
             <div className="output-content">
               {!output && (
                 <div className="output-placeholder">
-                  No predictions yet. Run a prediction to see results here.
+                  {jobStatus ? (
+                    <div>
+                      <span className="spinner-inline" aria-hidden="true" />
+                      <span>{jobStatus.message}</span>
+                    </div>
+                  ) : (
+                    "No predictions yet. Run a prediction to see results here."
+                  )}
                 </div>
               )}
 

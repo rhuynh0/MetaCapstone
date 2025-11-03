@@ -7,6 +7,12 @@ import joblib
 import os
 import pandas as pd
 from typing import List
+import subprocess
+import time
+import sys
+import threading
+import uuid
+from fastapi import BackgroundTasks, HTTPException
 
 MODELS_DIR = "models"
 vectorizer = joblib.load(os.path.join(MODELS_DIR, "vectorizer.pkl"))
@@ -56,13 +62,101 @@ async def predict_from_csv(file: UploadFile = File(...)):
 
 # Advanced prediction endpoint with categories
 @app.post("/predict-categories")
-async def predict_categories():
+async def predict_categories(payload: dict = None):
     """
-    Generate category-based interest profile using predict.py logic
+    Generate category-based interest profile using predict.py logic.
+    Optionally accepts JSON body: { "urls": ["http://...", ...] }
+    If no urls provided, predict.generate_interest_profile() will fallback to reading history file.
     """
     try:
+        # If model artifacts are missing, run the training scripts so predictions can be generated.
+        def models_exist():
+            required = [
+                "vectorizer.pkl",
+                "classifier.pkl",
+                "regressor.pkl",
+                "categorizer.pkl",
+                "categorizer_vectorizer.pkl",
+                "categorizer_label_encoder.pkl",
+                "meta.pkl",
+            ]
+            return all(os.path.exists(os.path.join(MODELS_DIR, f)) for f in required)
+
+        retrain_requested = False
+        if payload and isinstance(payload, dict):
+            retrain_requested = bool(payload.get("retrain", False))
+
+        if retrain_requested or not models_exist():
+            print("Retrain requested or model artifacts missing. Running training scripts...")
+            # Run train.py and train_categorizer.py sequentially using sys.executable to respect venv
+            try:
+                start = time.time()
+                res1 = subprocess.run([sys.executable, "train.py"], cwd=".")
+                if res1.returncode != 0:
+                    return {"error": "train.py failed; see server logs for details"}
+                res2 = subprocess.run([sys.executable, "train_categorizer.py"], cwd=".")
+                if res2.returncode != 0:
+                    return {"error": "train_categorizer.py failed; see server logs for details"}
+                print(f"Training completed in {time.time() - start:.1f}s")
+            except Exception as t_err:
+                return {"error": f"Training step failed: {str(t_err)}"}
+
         import predict
-        result = predict.generate_interest_profile()
+        urls = None
+        if payload and isinstance(payload, dict):
+            urls = payload.get("urls")
+        # Call predict with optional urls list
+        result = predict.generate_interest_profile(urls=urls)
         return result
     except Exception as e:
         return {"error": f"Category prediction failed: {str(e)}"}
+
+
+# --- Simple in-memory job store for background training jobs ---
+JOB_STORE = {}
+# JOB_STORE[job_id] = { 'status': 'pending'|'running'|'succeeded'|'failed', 'message': str }
+
+def _run_training_job(job_id: str):
+    JOB_STORE[job_id] = {'status': 'running', 'message': 'Starting training...'}
+    try:
+        start = time.time()
+        JOB_STORE[job_id]['message'] = 'Running train.py'
+        r1 = subprocess.run([sys.executable, 'train.py'], cwd='.', capture_output=True, text=True)
+        JOB_STORE[job_id]['message'] = 'train.py finished'
+        if r1.returncode != 0:
+            JOB_STORE[job_id]['status'] = 'failed'
+            JOB_STORE[job_id]['message'] = f"train.py failed: {r1.stderr[:200]}"
+            return
+
+        JOB_STORE[job_id]['message'] = 'Running train_categorizer.py'
+        r2 = subprocess.run([sys.executable, 'train_categorizer.py'], cwd='.', capture_output=True, text=True)
+        JOB_STORE[job_id]['message'] = 'train_categorizer.py finished'
+        if r2.returncode != 0:
+            JOB_STORE[job_id]['status'] = 'failed'
+            JOB_STORE[job_id]['message'] = f"train_categorizer.py failed: {r2.stderr[:200]}"
+            return
+
+        JOB_STORE[job_id]['status'] = 'succeeded'
+        JOB_STORE[job_id]['message'] = f"Training completed in {time.time() - start:.1f}s"
+    except Exception as ex:
+        JOB_STORE[job_id]['status'] = 'failed'
+        JOB_STORE[job_id]['message'] = f"Training exception: {str(ex)}"
+
+
+@app.post('/retrain', status_code=202)
+async def retrain_endpoint():
+    """Start retraining in background and return a job id to poll."""
+    job_id = str(uuid.uuid4())
+    JOB_STORE[job_id] = {'status': 'pending', 'message': 'Queued'}
+    # Start background thread
+    t = threading.Thread(target=_run_training_job, args=(job_id,), daemon=True)
+    t.start()
+    return {'job_id': job_id, 'status': 'pending'}
+
+
+@app.get('/job-status/{job_id}')
+async def job_status(job_id: str):
+    info = JOB_STORE.get(job_id)
+    if not info:
+        raise HTTPException(status_code=404, detail='Job not found')
+    return {'job_id': job_id, 'status': info['status'], 'message': info.get('message','')}

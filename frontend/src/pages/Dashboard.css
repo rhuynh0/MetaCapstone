@@ -133,6 +133,23 @@
 .output-placeholder {
   @apply p-6 text-center text-gray-500;
 }
+
+/* Simple CSS spinner */
+.spinner-inline {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(0,0,0,0.1);
+  border-top-color: rgba(0,0,0,0.6);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+  margin-right: 0.5rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 .output-results {
   @apply space-y-4;
 }

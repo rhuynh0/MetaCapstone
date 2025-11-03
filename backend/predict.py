@@ -59,7 +59,11 @@ def extract_keywords_with_counts(url_texts, top_n=15):
     return Counter(filtered_words).most_common(top_n)
 
 # --- Main Prediction Logic ---
-def generate_interest_profile():
+def generate_interest_profile(urls: list = None):
+    """
+    Generate interest profile. If `urls` is provided (list of url strings), use it.
+    Otherwise fall back to reading from HISTORY_DATA_PATH.
+    """
     print("Loading all models...")
     # Load all necessary model artifacts
     regressor = load_model(os.path.join(MODELS_DIR, "regressor.pkl"))
@@ -73,15 +77,19 @@ def generate_interest_profile():
         print("A required model is missing. Please run train scripts. Aborting.")
         return
 
-    print(f"Loading user history from {HISTORY_DATA_PATH}...")
-    try:
-        history_df = pd.read_csv(HISTORY_DATA_PATH)
-        history_df.dropna(subset=["url"], inplace=True)
-    except FileNotFoundError:
-        print(f"Error: History data not found at {HISTORY_DATA_PATH}")
-        return
+    # Load history either from provided urls or from the history CSV
+    if urls is None:
+        print(f"Loading user history from {HISTORY_DATA_PATH}...")
+        try:
+            history_df = pd.read_csv(HISTORY_DATA_PATH)
+            history_df.dropna(subset=["url"], inplace=True)
+            urls = history_df["url"].astype(str).values
+        except FileNotFoundError:
+            print(f"Error: History data not found at {HISTORY_DATA_PATH}")
+            return
+    else:
+        print(f"Using {len(urls)} URLs passed in request for prediction.")
 
-    urls = history_df["url"].astype(str).values
     cleaned_urls_for_cat = basic_url_clean(urls)
 
     # Predict categories
