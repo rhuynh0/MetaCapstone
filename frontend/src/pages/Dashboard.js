@@ -121,20 +121,23 @@ export default function Dashboard() {
       const data = await response.json();
       
       // Filter and format results
+      // Ensure the UI always shows the pseudonym the user entered and a consistent model version.
       const filtered = {
-        meta: data.meta || {
+        meta: {
+          // start with backend meta if present so we keep other fields, but override user_pseudonym and model_version
+          ...(data.meta || {}),
           user_pseudonym: userId,
-          timestamp: new Date().toISOString(),
-          model_version: "backend-categories",
+          timestamp: (data.meta && data.meta.timestamp) || new Date().toISOString(),
+          model_version: "v0.1.1",
         },
         categories: (data.categories || [])
-          .map((c) => ({ 
-            ...c, 
+          .map((c) => ({
+            ...c,
             likelihood: Number(c.likelihood.toFixed(2)),
-            products: (c.products || []).map(p => ({
+            products: (c.products || []).map((p) => ({
               ...p,
-              likelihood: Number(p.likelihood.toFixed(3))
-            }))
+              likelihood: Number(p.likelihood.toFixed(3)),
+            })),
           }))
           .filter((c) => c.likelihood >= threshold)
           .slice(0, topK),
@@ -198,7 +201,7 @@ export default function Dashboard() {
           <div className="header-title-group">
             <div className="header-icon">AI</div>
             <div>
-              <h1 className="header-title">AI Ad Targeting — Demo UI</h1>
+              <h1 className="header-title">AdApt — AI Ad Targeting</h1>
               <p className="header-subtitle">
                 Predict category & product-level ad engagement with
                 explainability and export options.
@@ -208,7 +211,7 @@ export default function Dashboard() {
           <div className="header-model-info">
             <div className="model-info-text">
               <div className="model-label">Model</div>
-              <div className="model-version">v0.9.1-demo</div>
+              <div className="model-version">v0.1.1</div>
             </div>
             <button className="settings-button">Settings</button>
           </div>
@@ -219,8 +222,7 @@ export default function Dashboard() {
           <section className="input-panel">
             <h2 className="panel-title">Input / Ingestion</h2>
             <p className="panel-description">
-              Provide a browsing-history file or paste a sample. This demo uses
-              mock predictions.
+              Provide a browsing-history file.
             </p>
 
             <label className="form-label">User pseudonym</label>
@@ -429,16 +431,16 @@ export default function Dashboard() {
                             </div>
                           </div>
                           <div className="category-actions">
-                            <div className="actions-label">Action</div>
+                            <div className="actions-label">Actions</div>
                             <div className="action-buttons">
                               <button className="action-button">
-                                Preview Creatives
+                                Ex. Preview Creatives
                               </button>
                               <button className="action-button">
-                                Create Segment
+                                Ex. Create Segment
                               </button>
                               <button className="action-button">
-                                Push to DSP
+                                Ex. Push to DSP
                               </button>
                             </div>
                           </div>
@@ -446,7 +448,7 @@ export default function Dashboard() {
                         {explain && cat.explanation && (
                           <details className="explanation-details">
                             <summary className="explanation-summary">
-                              Why this prediction?
+                              Why this prediction? (To be updated)
                             </summary>
                             <ul className="explanation-list">
                               {cat.explanation.map((e, i) => (
@@ -487,8 +489,7 @@ export default function Dashboard() {
               <div className="footer-note">
                 <div>Export: JSON / CSV</div>
                 <div className="footer-note-details">
-                  Use the integration panel to configure API endpoints for
-                  production.
+                  (CSV includes per-product likelihoods and important keywords)
                 </div>
               </div>
             </div>
@@ -496,8 +497,7 @@ export default function Dashboard() {
         </main>
 
         <footer className="dashboard-footer">
-          Temporary frontend mockup — will replace the mock output with
-          backend model and APIs.
+          Created for Meta Capstone Project
         </footer>
       </div>
     </div>
