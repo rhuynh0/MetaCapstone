@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import "./Dashboard.css";
 
 export default function Dashboard() {
@@ -7,45 +7,142 @@ export default function Dashboard() {
   const [output, setOutput] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [jobStatus, setJobStatus] = useState(null);
-  const [threshold, setThreshold] = useState(0.05);
+  const threshold = 0.05;
   const [topK, setTopK] = useState(5);
   const [explain, setExplain] = useState(true);
-  const [apiKey, setApiKey] = useState("");
 
-  // Parse uploaded CSV file and extract URLs
+  // Parse uploaded CSV file and extract URLs. This is a lightweight parser:
+  // - strips a leading BOM
+  // - splits lines on CRLF or LF
+  // - splits columns on commas that are not inside quotes
+  // - trims surrounding quotes/spaces
+  // - looks for common header names (url, website, link, site)
   function parseCSV(text) {
-    const lines = text.split('\n').filter(Boolean);
-    if (lines.length < 2) return [];
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    const urlIdx = headers.findIndex(h => h.toLowerCase().includes('url'));
+    if (!text) return [];
+    // remove BOM if present
+    text = text.replace(/^\uFEFF/, '');
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length < 1) return [];
+
+    const splitLine = (line) =>
+      line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(s => s.trim().replace(/^\"|\"$/g, ''));
+
+    const headers = splitLine(lines[0]).map(h => h.toLowerCase());
+    const urlIdx = headers.findIndex(h => h.includes('url') || h.includes('website') || h.includes('link') || h.includes('site'));
     if (urlIdx === -1) return [];
+
     return lines.slice(1)
-      .map(line => line.split(',')[urlIdx]?.replace(/"/g, '').trim())
-      .filter(Boolean);
+      .map(line => splitLine(line)[urlIdx])
+      .filter(Boolean)
+      .map(s => s.trim());
   }
 
   const [uploadedURLs, setUploadedURLs] = useState([]);
-  const [inlineSample, setInlineSample] = useState("");
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [parseError, setParseError] = useState(null);
+  const fileInputRef = useRef(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [uploadedFileSize, setUploadedFileSize] = useState(null);
   function handleFileUpload(e) {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
+    // call but don't await here - UI will still update when parsing completes
+    processFile(f);
+  }
+
+  // Process file and return a Promise that resolves to parsed URLs.
+  // This lets callers await parsing (useful if Run is clicked immediately after upload).
+  function processFile(f) {
+    setParseError(null);
+    setUploadedFile(f);
     setUploadedFileName(f.name);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      let urls = [];
-      if (f.name.endsWith('.csv')) {
-        urls = parseCSV(event.target.result);
-      } else if (f.name.endsWith('.json')) {
-        try {
-          const data = JSON.parse(event.target.result);
-          if (Array.isArray(data)) {
-            urls = data.map(row => row.url).filter(Boolean);
+    setUploadedFileSize(f.size || null);
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        let urls = [];
+        const text = event.target.result || "";
+        if (f.name.toLowerCase().endsWith('.csv')) {
+          urls = parseCSV(text);
+          if (!urls || urls.length === 0) {
+            // clear uploaded file state and show parse error popup
+            setUploadedFileName(null);
+            setUploadedFile(null);
+            setUploadedFileSize(null);
+            setUploadedURLs([]);
+            setParseError(`Uploaded file "${f.name}" appears invalid or is missing a URL column. Please check the file and try again.`);
           }
-        } catch {}
-      }
-      setUploadedURLs(urls);
-    };
-    reader.readAsText(f);
+        } else if (f.name.toLowerCase().endsWith('.json')) {
+          try {
+            const data = JSON.parse(text);
+            if (Array.isArray(data)) {
+              urls = data.map(row => row.url).filter(Boolean);
+            } else if (data && typeof data === 'object') {
+              // maybe an object with a list at a key like 'rows' or 'data'
+              const arr = data.rows || data.data || null;
+              if (Array.isArray(arr)) urls = arr.map(r => r.url).filter(Boolean);
+            }
+            if (!urls || urls.length === 0) {
+              setUploadedFileName(null);
+              setUploadedFile(null);
+              setUploadedFileSize(null);
+              setUploadedURLs([]);
+              setParseError(`Uploaded JSON "${f.name}" did not contain any URL values. Please check the file and try again.`);
+            }
+          } catch (e) {
+            // ignore parse errors, leave urls empty
+            urls = [];
+            setUploadedFileName(null);
+            setUploadedFile(null);
+            setUploadedFileSize(null);
+            setUploadedURLs([]);
+            setParseError(`Uploaded JSON "${f.name}" could not be parsed. Please check the file and try again.`);
+          }
+        }
+        setUploadedURLs(urls);
+        resolve(urls);
+      };
+      reader.readAsText(f);
+    });
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) processFile(f);
+  }
+
+  function removeUploadedFile(e) {
+    e && e.stopPropagation();
+    setUploadedFileName(null);
+    setUploadedURLs([]);
+    setUploadedFileSize(null);
+    setUploadedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = null;
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === null || bytes === undefined) return "-";
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const num = parseFloat((bytes / Math.pow(k, i)).toFixed(2));
+    return `${num} ${sizes[i]}`;
   }
 
   async function runInference() {
@@ -53,9 +150,15 @@ export default function Dashboard() {
     setOutput(null);
     setJobStatus({ status: 'starting', message: 'Initializing retrain...' });
     try {
+      // If uploaded file exists but parsing hasn't completed, await it.
+      if ((!uploadedURLs || uploadedURLs.length === 0) && uploadedFile) {
+        // processFile returns a Promise that resolves with parsed URLs
+        await processFile(uploadedFile);
+      }
+
       // If no uploaded data, prompt user and emit console messages for a short time
-      if ((!uploadedURLs || uploadedURLs.length === 0) && !inlineSample) {
-        console.warn("No file or inline sample provided. Please upload a CSV/JSON with a 'url' column or paste a sample.");
+      if (!uploadedURLs || uploadedURLs.length === 0) {
+        console.warn("No file provided. Please upload a CSV/JSON with a 'url' column.");
         // show lightweight console 'processing' messages for ~2 seconds to give the user time
         console.log("Waiting for input... (upload a file or paste sample in the text area)");
         await new Promise((resolve) => {
@@ -69,20 +172,10 @@ export default function Dashboard() {
         return;
       }
 
-      // Prepare request payload: prefer uploaded file urls, otherwise try inline sample
+      // Prepare request payload: use uploaded file urls
       let payload = null;
       if (uploadedURLs && uploadedURLs.length > 0) {
         payload = { urls: uploadedURLs };
-      } else if (inlineSample) {
-        try {
-          const parsed = JSON.parse(inlineSample);
-          if (Array.isArray(parsed)) {
-            payload = { urls: parsed.map((r) => r.url).filter(Boolean) };
-          }
-        } catch (e) {
-          // not JSON - leave payload null so backend will fallback
-          console.warn('Inline sample could not be parsed as JSON; sending no payload so backend may use history fallback.');
-        }
       }
 
       // Start retraining asynchronously via /retrain, then poll job status
@@ -196,12 +289,30 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-container">
+      {parseError && (
+        <div style={{position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60}}>
+          <div style={{background: 'white', padding: 24, borderRadius: 8, maxWidth: 520, width: '90%', boxShadow: '0 10px 30px rgba(0,0,0,0.25)'}}>
+            <h3 style={{marginTop: 0}}>Invalid file</h3>
+            <p style={{marginBottom: 16}}>{parseError}</p>
+            <div style={{display: 'flex', justifyContent: 'flex-end'}}>
+              <button onClick={() => setParseError(null)} style={{padding: '8px 12px', borderRadius: 6, border: 'none', background: '#2563eb', color: 'white'}}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="dashboard-content">
         <header className="dashboard-header">
           <div className="header-title-group">
-            <div className="header-icon">AI</div>
+            <div className="header-icon">
+              <img
+                src="https://cdn.statically.io/img/registry.npmmirror.com/@lobehub/icons-static-png/1.74.0/files/dark/meta-color.png"
+                alt="Meta logo"
+                className="header-logo"
+                loading="lazy"
+              />
+            </div>
             <div>
-              <h1 className="header-title">AdApt — AI Ad Targeting</h1>
+              <h1 className="header-title">Meta AdApt</h1>
               <p className="header-subtitle">
                 Predict category & product-level ad engagement with
                 explainability and export options.
@@ -210,10 +321,32 @@ export default function Dashboard() {
           </div>
           <div className="header-model-info">
             <div className="model-info-text">
-              <div className="model-label">Model</div>
-              <div className="model-version">v0.1.1</div>
+              {/* <div className="model-version">v0.1.1</div> */}
             </div>
-            <button className="settings-button">Settings</button>
+            <button
+              className="settings-button p-2 rounded-full bg-white/40 backdrop-blur-md shadow-md hover:shadow-lg hover:bg-white/60 transition-all duration-200"
+              aria-label="Settings"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth="1.8"
+                stroke="currentColor"
+                className="w-5 h-5 text-gray-600"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.944 3.31.823 2.366 2.366a1.724 1.724 0 001.065 2.573c1.757.426 1.757 2.924 0 3.35a1.724 1.724 0 00-1.065 2.573c.944 1.543-.823 3.31-2.366 2.366a1.724 1.724 0 00-2.573 1.065c-.426 1.757-2.924 1.757-3.35 0a1.724 1.724 0 00-2.573-1.065c-1.543.944-3.31-.823-2.366-2.366a1.724 1.724 0 00-1.065-2.573c-1.757-.426-1.757-2.924 0-3.35a1.724 1.724 0 001.065-2.573c-.944-1.543.823-3.31 2.366-2.366a1.724 1.724 0 002.573-1.065z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+              </svg>
+            </button>
           </div>
         </header>
 
@@ -232,42 +365,50 @@ export default function Dashboard() {
               className="text-input"
             />
 
-            <label className="form-label">
-              Upload browsing history (JSON / CSV)
-            </label>
-            <input
-              type="file"
-              accept=".json,.csv,text/csv,application/json"
-              onChange={handleFileUpload}
-              className="file-input"
-            />
-            <div className="file-status">
-              {uploadedFileName
-                ? `Selected: ${uploadedFileName}`
-                : "No file selected"}
-            </div>
+            <label className="form-label">Upload browsing history (JSON / CSV)</label>
 
-            <label className="form-label">Inline sample (optional)</label>
-            <textarea
-              placeholder='[ {"url": "https://example.com/product/123", "timestamp": "2025-09-28T10:00:00Z" } ]'
-              className="textarea-input"
-              value={inlineSample}
-              onChange={(e) => setInlineSample(e.target.value)}
-            />
-
-            <div className="slider-control">
-              <label className="control-label">Threshold</label>
+            <div
+              className={`upload-dropzone ${dragActive ? 'drag-active' : ''}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current && fileInputRef.current.click(); }}
+            >
               <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={threshold}
-                onChange={(e) => setThreshold(Number(e.target.value))}
-                className="slider"
+                ref={fileInputRef}
+                type="file"
+                accept=".json,.csv,text/csv,application/json"
+                onChange={handleFileUpload}
+                className="file-input-hidden"
               />
-              <div className="slider-value">{Math.round(threshold * 100)}%</div>
+
+              <div className="upload-placeholder">
+                <div className="upload-icon">☁️</div>
+                <div className="upload-text">
+                  Drag & Drop your file here, or <span className="browse-link">browse</span>
+                </div>
+                <div className="upload-hint">Supported: .csv, .json</div>
+              </div>
+
+              {uploadedFileName ? (
+                <div className="upload-info">
+                  <div className="upload-name">{uploadedFileName}</div>
+                  <div className="upload-meta">{formatBytes(uploadedFileSize)}</div>
+                  <button className="remove-button" onClick={removeUploadedFile}>
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <div className="file-status">No file selected</div>
+              )}
             </div>
+
+            {/* Inline sample removed — UI accepts uploaded CSV/JSON files only */}
+
+            {/* Threshold is fixed to 0.05 by design; slider removed */}
 
             <div className="number-control">
               <label className="control-label">Top K categories</label>
@@ -287,7 +428,22 @@ export default function Dashboard() {
                 disabled={processing}
                 className="run-button"
               >
-                {processing ? "Processing…" : "Run Prediction"}
+                {processing ? (
+                  "Processing…"
+                ) : (
+                  <>
+                    <svg
+                      className="run-icon"
+                      viewBox="0 3 24 24"
+                      xmlns="http://www.w3.org/2000/svg"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path d="M5 3v18l15-9L5 3z" fill="white" />
+                    </svg>
+                    <span>Run Prediction</span>
+                  </>
+                )}
               </button>
               {/* jobStatus is shown in the output panel placeholder; no duplicate needed here */}
               <button
@@ -295,7 +451,7 @@ export default function Dashboard() {
                   setOutput(null);
                   setUploadedFileName(null);
                   setUploadedURLs([]);
-                  setInlineSample("");
+                  setUploadedFileSize(null);
                 }}
                 className="clear-button"
               >
@@ -318,18 +474,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="settings-section">
-              <div className="section-title">Integration</div>
-              <div className="section-subtitle">
-                API key (optional, for connecting to a backend)
-              </div>
-              <input
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="text-input"
-                placeholder="sk-..."
-              />
-            </div>
+            {/* Integration section removed (API key input) */}
           </section>
 
           {/* Right panel: Output */}
@@ -409,26 +554,32 @@ export default function Dashboard() {
                                 {Math.round(cat.likelihood * 100)}% likelihood
                               </div>
                             </div>
-                            <div className="product-list">
-                              {cat.products.map((p, i) => (
-                                <div key={i} className="product-item">
-                                  <div className="product-name">{p.name}</div>
-                                  <div className="progress-bar-container">
-                                    <div
-                                      style={{
-                                        width: `${Math.round(
-                                          p.likelihood * 100
-                                        )}%`,
-                                      }}
-                                      className="progress-bar"
-                                    />
-                                  </div>
-                                  <div className="product-likelihood">
-                                    {Math.round(p.likelihood * 100)}%
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                                    <div className="product-list">
+                                      {cat.products.map((p, i) => {
+                                        const likelihoodNum = Number(p.likelihood) || 0;
+                                        const pct = Math.round(likelihoodNum * 100);
+                                        // ensure tiny non-zero probabilities are still visible
+                                        const visiblePct = pct === 0 && likelihoodNum > 0 ? 1 : pct;
+                                        return (
+                                          <div key={`${idx}-${i}`} className="product-item">
+                                            <div className="product-name">{p.name}</div>
+                                            <div className="progress-bar-container">
+                                              <div
+                                                style={{
+                                                  width: `${visiblePct}%`,
+                                                  minWidth: likelihoodNum > 0 ? '2px' : '0',
+                                                  transition: 'width .4s ease',
+                                                }}
+                                                className="progress-bar"
+                                              />
+                                            </div>
+                                            <div className="product-likelihood">
+                                              {pct}%
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
                           </div>
                           <div className="category-actions">
                             <div className="actions-label">Actions</div>
@@ -497,7 +648,7 @@ export default function Dashboard() {
         </main>
 
         <footer className="dashboard-footer">
-          Created for Meta Capstone Project
+          Created for Meta Capstone Project - Not officially affiliated with Meta
         </footer>
       </div>
     </div>
