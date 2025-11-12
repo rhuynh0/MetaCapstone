@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import "./Dashboard.css";
+import NestedPieChart from "../components/NestedPieChart";
 
 export default function Dashboard() {
   const [uploadedFileName, setUploadedFileName] = useState(null);
@@ -542,6 +543,13 @@ export default function Dashboard() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Nested Pie Chart Visualization */}
+                  {output.categories && output.categories.length > 0 && (
+                    <div style={{ marginBottom: "30px" }}>
+                      <NestedPieChart categories={output.categories} />
+                    </div>
+                  )}
 
                   <div className="category-list">
                     {output.categories.map((cat, idx) => (
