@@ -11,6 +11,7 @@ export default function Dashboard() {
   const threshold = 0.05;
   const [topK, setTopK] = useState(5);
   const [explain, setExplain] = useState(true);
+  const [latencyMs, setLatencyMs] = useState(null);
 
   // Parse uploaded CSV file and extract URLs. This is a lightweight parser:
   // - strips a leading BOM
@@ -150,6 +151,7 @@ export default function Dashboard() {
     setProcessing(true);
     setOutput(null);
     setJobStatus({ status: 'starting', message: 'Initializing retrain...' });
+    setLatencyMs(null);
     try {
       // If uploaded file exists but parsing hasn't completed, await it.
       if ((!uploadedURLs || uploadedURLs.length === 0) && uploadedFile) {
@@ -207,12 +209,15 @@ export default function Dashboard() {
       }
 
       // Training succeeded — now call predict-categories (no retrain flag)
+      const t0 = performance.now();
       const response = await fetch("http://localhost:8000/predict-categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload || {}),
       });
       const data = await response.json();
+      const t1 = performance.now();
+      setLatencyMs(t1 - t0);
       
       // Filter and format results
       // Ensure the UI always shows the pseudonym the user entered and a consistent model version.
@@ -240,6 +245,7 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Prediction error:", err);
       setOutput({ meta: { error: "Prediction failed: " + err.message }, categories: [] });
+      setLatencyMs(null);
     } finally {
       setProcessing(false);
       setJobStatus(null);
@@ -453,6 +459,7 @@ export default function Dashboard() {
                   setUploadedFileName(null);
                   setUploadedURLs([]);
                   setUploadedFileSize(null);
+                  setLatencyMs(null);
                 }}
                 className="clear-button"
               >
@@ -545,11 +552,10 @@ export default function Dashboard() {
                   </div>
 
                   {/* Nested Pie Chart Visualization */}
-                  {output.categories && output.categories.length > 0 && (
-                    <div style={{ marginBottom: "30px" }}>
-                      <NestedPieChart categories={output.categories} />
-                    </div>
-                  )}
+                  <div className="chart-container" style={{ marginBottom: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Category Distribution</h3>
+                    <NestedPieChart categories={output.categories} />
+                  </div>
 
                   <div className="category-list">
                     {output.categories.map((cat, idx) => (
@@ -589,20 +595,6 @@ export default function Dashboard() {
                                       })}
                                     </div>
                           </div>
-                          <div className="category-actions">
-                            <div className="actions-label">Actions</div>
-                            <div className="action-buttons">
-                              <button className="action-button">
-                                Ex. Preview Creatives
-                              </button>
-                              <button className="action-button">
-                                Ex. Create Segment
-                              </button>
-                              <button className="action-button">
-                                Ex. Push to DSP
-                              </button>
-                            </div>
-                          </div>
                         </div>
                         {explain && cat.explanation && (
                           <details className="explanation-details">
@@ -635,8 +627,28 @@ export default function Dashboard() {
             <div className="output-footer">
               <div>
                 <div>
-                  Latency (simulated):{" "}
-                  <span className="footer-value">~600ms</span>
+                  Latency:{" "}
+                  {latencyMs !== null ? (
+                    <>
+                      <span className="footer-value">
+                        {latencyMs >= 1000
+                          ? `${(latencyMs / 1000).toFixed(1)}s`
+                          : `${Math.round(latencyMs)}ms`}
+                      </span>
+                      <span
+                        className="footer-value"
+                        style={{ marginLeft: 6, color: '#6b7280' }}
+                      >
+                        (
+                        {latencyMs >= 1000
+                          ? `${Math.round(latencyMs)}ms`
+                          : `${(latencyMs / 1000).toFixed(1)}s`}
+                        )
+                      </span>
+                    </>
+                  ) : (
+                    <span className="footer-value">-</span>
+                  )}
                 </div>
                 <div>
                   Inference threshold:{" "}

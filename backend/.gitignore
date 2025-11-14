@@ -1,2 +1,55 @@
-# Ignore Python virtual environment folder
+# Python environments
 .venv/
+venv/
+env/
+
+# Python bytecode / build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+
+# Linters / tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.cache/
+
+# Coverage / test outputs
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# Logs / temp files
+*.log
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Model artifacts (do not commit trained models)
+*.pkl
+*.pickle
+*.joblib
+*.pkl.gz
+*.model
+*.sav
+*.h5
+*.hdf5
+*.onnx
+models/*
