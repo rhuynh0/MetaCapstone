@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import "./Dashboard.css";
 import NestedPieChart from "../components/NestedPieChart";
 
@@ -12,6 +12,61 @@ export default function Dashboard() {
   const [topK, setTopK] = useState(5);
   const [explain, setExplain] = useState(true);
   const [latencyMs, setLatencyMs] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Initialize preferences from localStorage and apply theme
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem('theme');
+      const isDark = savedTheme ? savedTheme === 'dark' : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      setDarkMode(!!isDark);
+      applyTheme(!!isDark);
+    } catch (_) {}
+    try {
+      const savedExplain = localStorage.getItem('explain');
+      if (savedExplain === 'true' || savedExplain === 'false') {
+        setExplain(savedExplain === 'true');
+      }
+    } catch (_) {}
+  }, []);
+
+  function applyTheme(isDark) {
+    const root = document.documentElement;
+    if (isDark) root.classList.add('dark');
+    else root.classList.remove('dark');
+  }
+
+  function toggleDarkMode(next) {
+    setDarkMode(next);
+    applyTheme(next);
+    try { localStorage.setItem('theme', next ? 'dark' : 'light'); } catch (_) {}
+  }
+  const [expandedCategories, setExpandedCategories] = useState({});
+
+  function toggleCategory(idx) {
+    setExpandedCategories(prev => ({ ...prev, [idx]: !prev[idx] }));
+  }
+
+  function formatBarColor(value) {
+    // value expected 0..1
+    const v = Math.max(0, Math.min(1, value));
+    // Hue from 0 (red) -> 120 (green)
+    const hue = Math.round(120 * v);
+    const saturation = 65; // percent
+    const lightness = 52 - (v * 10); // slightly darker for higher values
+    return `hsl(${hue} ${saturation}% ${lightness}%)`;
+  }
+
+  function formatBarGradient(value) {
+    const base = formatBarColor(value);
+    // lighten end color
+    const v = Math.max(0, Math.min(1, value));
+    const hue = Math.round(120 * v);
+    const endLight = 70 - (v * 8);
+    const end = `hsl(${hue} 68% ${endLight}%)`;
+    return `linear-gradient(90deg, ${base}, ${end})`;
+  }
 
   // Parse uploaded CSV file and extract URLs. This is a lightweight parser:
   // - strips a leading BOM
@@ -152,6 +207,7 @@ export default function Dashboard() {
     setOutput(null);
     setJobStatus({ status: 'starting', message: 'Initializing retrain...' });
     setLatencyMs(null);
+    const tStart = performance.now();
     try {
       // If uploaded file exists but parsing hasn't completed, await it.
       if ((!uploadedURLs || uploadedURLs.length === 0) && uploadedFile) {
@@ -209,15 +265,12 @@ export default function Dashboard() {
       }
 
       // Training succeeded — now call predict-categories (no retrain flag)
-      const t0 = performance.now();
       const response = await fetch("http://localhost:8000/predict-categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload || {}),
       });
       const data = await response.json();
-      const t1 = performance.now();
-      setLatencyMs(t1 - t0);
       
       // Filter and format results
       // Ensure the UI always shows the pseudonym the user entered and a consistent model version.
@@ -242,6 +295,7 @@ export default function Dashboard() {
           .slice(0, topK),
       };
       setOutput(filtered);
+      setLatencyMs(performance.now() - tStart);
     } catch (err) {
       console.error("Prediction error:", err);
       setOutput({ meta: { error: "Prediction failed: " + err.message }, categories: [] });
@@ -331,6 +385,7 @@ export default function Dashboard() {
               {/* <div className="model-version">v0.1.1</div> */}
             </div>
             <button
+              onClick={() => setSettingsOpen(true)}
               className="settings-button p-2 rounded-full bg-white/40 backdrop-blur-md shadow-md hover:shadow-lg hover:bg-white/60 transition-all duration-200"
               aria-label="Settings"
             >
@@ -558,58 +613,68 @@ export default function Dashboard() {
                   </div>
 
                   <div className="category-list">
-                    {output.categories.map((cat, idx) => (
-                      <div key={idx} className="category-item">
-                        <div className="category-header">
-                          <div>
-                            <div className="category-title-group">
-                              <h3 className="category-name">{cat.name}</h3>
-                              <div className="category-likelihood">
-                                {Math.round(cat.likelihood * 100)}% likelihood
-                              </div>
+                    {output.categories.map((cat, idx) => {
+                      const expanded = !!expandedCategories[idx];
+                      const allProducts = cat.products || [];
+                      const sortedProducts = [...allProducts].sort((a,b) => (b.likelihood || 0) - (a.likelihood || 0));
+                      const sliceCount = 6; // number to show when collapsed
+                      const visibleProducts = expanded ? sortedProducts : sortedProducts.slice(0, sliceCount);
+                      const productMax = Math.max(...sortedProducts.map(p => Number(p.likelihood) || 0), 0);
+                      return (
+                        <div key={idx} className={`category-item redesigned ${expanded ? 'expanded' : 'collapsed'}`}>
+                          <div className="category-top">
+                            <h3 className="category-name">{cat.name}</h3>
+                            <div className="category-score-pill" title="Category likelihood">
+                              {Math.round(cat.likelihood * 100)}%
                             </div>
-                                    <div className="product-list">
-                                      {cat.products.map((p, i) => {
-                                        const likelihoodNum = Number(p.likelihood) || 0;
-                                        const pct = Math.round(likelihoodNum * 100);
-                                        // ensure tiny non-zero probabilities are still visible
-                                        const visiblePct = pct === 0 && likelihoodNum > 0 ? 1 : pct;
-                                        return (
-                                          <div key={`${idx}-${i}`} className="product-item">
-                                            <div className="product-name">{p.name}</div>
-                                            <div className="progress-bar-container">
-                                              <div
-                                                style={{
-                                                  width: `${visiblePct}%`,
-                                                  minWidth: likelihoodNum > 0 ? '2px' : '0',
-                                                  transition: 'width .4s ease',
-                                                }}
-                                                className="progress-bar"
-                                              />
-                                            </div>
-                                            <div className="product-likelihood">
-                                              {pct}%
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
                           </div>
+                          <div className="product-grid">
+                            {visibleProducts.map((p, i) => {
+                              const likelihoodNum = Number(p.likelihood) || 0;
+                              const percentDisplay = Math.round(likelihoodNum * 100);
+                              const ratio = productMax > 0 ? (likelihoodNum / productMax) : 0;
+                              const barWidth = Math.max(ratio * 100, likelihoodNum > 0 ? 5 : 0);
+                              const gradient = formatBarGradient(likelihoodNum);
+                              return (
+                                <div key={`${idx}-${i}`} className="product-cell" title={`${p.name} – ${percentDisplay}%`}> 
+                                  <div className="product-cell-header">
+                                    <span className="product-cell-name" title={p.name}>{p.name}</span>
+                                    <span className="product-cell-pct">{percentDisplay}%</span>
+                                  </div>
+                                  <div className="product-bar-track">
+                                    <div
+                                      className="product-bar-fill scaled"
+                                      style={{ width: `${barWidth}%`, background: gradient }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="category-toggle-row">
+                            {sortedProducts.length > sliceCount && (
+                              <button
+                                onClick={() => toggleCategory(idx)}
+                                className="category-toggle"
+                                aria-expanded={expanded}
+                              >
+                                {expanded ? 'Show Less' : `Show All (${sortedProducts.length})`}
+                              </button>
+                            )}
+                          </div>
+                          {explain && cat.explanation && (
+                            <details className="explanation-details compact">
+                              <summary className="explanation-summary">Explanation</summary>
+                              <ul className="explanation-list">
+                                {cat.explanation.map((e, i) => (
+                                  <li key={i}>{e}</li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
                         </div>
-                        {explain && cat.explanation && (
-                          <details className="explanation-details">
-                            <summary className="explanation-summary">
-                              Why this prediction? (To be updated)
-                            </summary>
-                            <ul className="explanation-list">
-                              {cat.explanation.map((e, i) => (
-                                <li key={i}>{e}</li>
-                              ))}
-                            </ul>
-                          </details>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   <div className="raw-output-section">
@@ -666,6 +731,41 @@ export default function Dashboard() {
             </div>
           </section>
         </main>
+
+        {settingsOpen && (
+          <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false); }}>
+            <div className="modal">
+              <h3 style={{marginTop:0, marginBottom: 8}}>Settings</h3>
+              <div className="section-subtitle" style={{marginBottom: 12}}>Customize appearance and defaults</div>
+
+              <div className="settings-row" style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, marginBottom:12}}>
+                <div>
+                  <div className="section-title">Dark mode</div>
+                  <div className="section-subtitle">Use a darker theme optimized for low-light</div>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={darkMode} onChange={(e) => toggleDarkMode(e.target.checked)} />
+                  <span className="slider round" />
+                </label>
+              </div>
+
+              <div className="settings-row" style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, marginBottom:12}}>
+                <div>
+                  <div className="section-title">Explanations</div>
+                  <div className="section-subtitle">Include per-prediction explanations by default</div>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={!!explain} onChange={(e) => { setExplain(e.target.checked); try { localStorage.setItem('explain', e.target.checked ? 'true' : 'false'); } catch (_) {} }} />
+                  <span className="slider round" />
+                </label>
+              </div>
+
+              <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:16}}>
+                <button className="clear-button" onClick={() => setSettingsOpen(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <footer className="dashboard-footer">
           Created for Meta Capstone Project - Not officially affiliated with Meta

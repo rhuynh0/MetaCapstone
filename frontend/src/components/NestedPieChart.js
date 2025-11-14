@@ -24,13 +24,15 @@ export default function NestedPieChart({ categories }) {
   let outerOffset = 0;
 
   // Use a tight SVG canvas so visual center is consistent
-  const padding = 10;
-  const outerRadius = 150;
-  const innerRadius = 80;
+  const padding = 28; // extra room so labels aren't clipped
+  const outerRadius = 190; // enlarged for readability
+  const innerRadius = 120; // enlarged inner ring outer radius
+  const innerInnerRadius = innerRadius - 40; // keep ring thickness ≈ 40px
   const width = outerRadius * 2 + padding * 2; // tight width ignoring labels
   const height = outerRadius * 2 + padding * 2; // tight height
   const centerX = width / 2;
   const centerY = height / 2;
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
   const polarToCartesian = (cx, cy, radius, angle) => {
     const rad = (angle - 90) * Math.PI / 180;
@@ -43,7 +45,12 @@ export default function NestedPieChart({ categories }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+        <svg
+          width={width}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          style={{ overflow: 'visible' }}
+        >
           {/* Outer ring - Categories */}
           {chartData.map((cat, idx) => {
             const angle = (cat.likelihood / total) * 360;
@@ -53,7 +60,7 @@ export default function NestedPieChart({ categories }) {
 
             const midAngle = (startAngle + endAngle) / 2;
             // Place labels inside the ring so text length doesn't affect perceived centering
-            const labelRadius = outerRadius - 18;
+            const labelRadius = outerRadius - 26;
             const labelPos = polarToCartesian(centerX, centerY, labelRadius, midAngle);
 
             const outerStart = polarToCartesian(centerX, centerY, outerRadius, startAngle);
@@ -85,10 +92,12 @@ export default function NestedPieChart({ categories }) {
                   x={labelPos.x}
                   y={labelPos.y}
                   textAnchor="middle"
-                  fontSize="11"
+                  fontSize="13"
                   fontWeight="600"
-                  fill="#374151"
-                  style={{ pointerEvents: 'none' }}
+                  fill="#ffffff"
+                  stroke="#000000"
+                  strokeWidth="2.0"
+                  style={{ pointerEvents: 'none', paintOrder: 'stroke' }}
                 >
                   {cat.name}
                 </text>
@@ -96,9 +105,11 @@ export default function NestedPieChart({ categories }) {
                   x={labelPos.x}
                   y={labelPos.y + 12}
                   textAnchor="middle"
-                  fontSize="9"
-                  fill="#6b7280"
-                  style={{ pointerEvents: 'none' }}
+                  fontSize="11"
+                  fill="#ffffff"
+                  stroke="#000000"
+                  strokeWidth="1.4"
+                  style={{ pointerEvents: 'none', paintOrder: 'stroke' }}
                 >
                   {Math.round(cat.likelihood * 100)}%
                 </text>
@@ -108,91 +119,135 @@ export default function NestedPieChart({ categories }) {
 
           {/* Inner ring - Products */}
           {selectedCategory !== null ? (
-            // Show only selected category's products expanded to full 360°
             (() => {
               const cat = chartData[selectedCategory];
               const productTotal = cat.products.reduce((sum, p) => sum + p.likelihood, 0);
+              if (!productTotal || cat.products.length === 1) {
+                const r = (innerRadius + innerInnerRadius) / 2;
+                const sw = innerRadius - innerInnerRadius;
+                const only = cat.products[0] || { name: 'N/A', likelihood: 0 };
+                const denom = productTotal || (only.likelihood || 1);
+                const pct = Math.round((only.likelihood / denom) * 100);
+                return (
+                  <g key={`selected-single`}>
+                    <circle cx={centerX} cy={centerY} r={r} fill="none" stroke={cat.productColors[0] || cat.color} strokeWidth={sw}>
+                      <title>{only.name}: {pct}%</title>
+                    </circle>
+                  </g>
+                );
+              }
               let productOffset = 0;
-
               return cat.products.map((product, pIdx) => {
-                const productAngle = (product.likelihood / productTotal) * 360;
+                const val = product.likelihood || 0;
+                if (val <= 0) return null;
+                let productAngle = (val / productTotal) * 360;
+                if (productAngle >= 360) productAngle = 359.999;
+                if (productAngle <= 0.01) return null;
                 const startAngle = productOffset;
                 const endAngle = startAngle + productAngle;
                 productOffset = endAngle;
-
                 const outerStart = polarToCartesian(centerX, centerY, innerRadius, startAngle);
                 const outerEnd = polarToCartesian(centerX, centerY, innerRadius, endAngle);
-                const innerStart = polarToCartesian(centerX, centerY, 40, startAngle);
-                const innerEnd = polarToCartesian(centerX, centerY, 40, endAngle);
+                const innerStart = polarToCartesian(centerX, centerY, innerInnerRadius, startAngle);
+                const innerEnd = polarToCartesian(centerX, centerY, innerInnerRadius, endAngle);
                 const largeArc = productAngle > 180 ? 1 : 0;
-
                 return (
                   <g key={`selected-${pIdx}`}>
                     <path
                       d={`M ${outerStart.x} ${outerStart.y}
                           A ${innerRadius} ${innerRadius} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y}
                           L ${innerEnd.x} ${innerEnd.y}
-                          A 40 40 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}
+                          A ${innerInnerRadius} ${innerInnerRadius} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}
                           Z`}
                       fill={cat.productColors[pIdx]}
-                      stroke="white"
-                      strokeWidth="1.5"
+                      stroke="none"
                     />
-                    <title>{product.name}: {Math.round(product.likelihood * 100)}%</title>
+                    <title>{product.name}: {Math.round(val * 100)}%</title>
                   </g>
                 );
               });
             })()
           ) : (
-            // Show all products from all categories
             chartData.map((cat, catIdx) => {
               const catAngle = (cat.likelihood / total) * 360;
               const catStart = chartData.slice(0, catIdx).reduce((sum, c) => sum + (c.likelihood / total) * 360, 0);
-              
               const productTotal = cat.products.reduce((sum, p) => sum + p.likelihood, 0);
               let productOffset = 0;
-
               return cat.products.map((product, pIdx) => {
-                const productAngle = (product.likelihood / productTotal) * catAngle;
+                const val = product.likelihood || 0;
+                if (val <= 0) return null;
+                let productAngle = (val / productTotal) * catAngle;
+                if (productAngle <= 0.01) return null;
                 const startAngle = catStart + productOffset;
                 const endAngle = startAngle + productAngle;
                 productOffset += productAngle;
-
                 const outerStart = polarToCartesian(centerX, centerY, innerRadius, startAngle);
                 const outerEnd = polarToCartesian(centerX, centerY, innerRadius, endAngle);
-                const innerStart = polarToCartesian(centerX, centerY, 40, startAngle);
-                const innerEnd = polarToCartesian(centerX, centerY, 40, endAngle);
+                const innerStart = polarToCartesian(centerX, centerY, innerInnerRadius, startAngle);
+                const innerEnd = polarToCartesian(centerX, centerY, innerInnerRadius, endAngle);
                 const largeArc = productAngle > 180 ? 1 : 0;
-
                 return (
                   <g key={`${catIdx}-${pIdx}`}>
                     <path
                       d={`M ${outerStart.x} ${outerStart.y}
                           A ${innerRadius} ${innerRadius} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y}
                           L ${innerEnd.x} ${innerEnd.y}
-                          A 40 40 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}
+                          A ${innerInnerRadius} ${innerInnerRadius} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}
                           Z`}
                       fill={cat.productColors[pIdx]}
-                      stroke="white"
-                      strokeWidth="1.5"
+                      stroke="none"
                     />
-                    <title>{product.name}: {Math.round(product.likelihood * 100)}%</title>
+                    <title>{product.name}: {Math.round(val * 100)}%</title>
                   </g>
                 );
               });
             })
           )}
 
+          {/* Inner area is covered by the center circle below */}
+
           {/* Center circle */
           }
           <circle
             cx={centerX}
             cy={centerY}
-            r="38"
-            fill="white"
-            stroke="#e5e7eb"
-            strokeWidth="2"
+            r={innerInnerRadius - 1}
+            fill={isDark ? '#111827' : 'white'}
+            stroke="none"
           />
+          {/* Center label when drilling down */}
+          {selectedCategory !== null && chartData[selectedCategory] && (
+            (() => {
+              const cat = chartData[selectedCategory];
+              const name = (cat.name || '').length > 16 ? `${cat.name.slice(0, 15)}…` : cat.name;
+              const pct = Math.round((cat.likelihood || 0) * 100);
+              return (
+                <g key="center-label">
+                  <text
+                    x={centerX}
+                    y={centerY - 2}
+                    textAnchor="middle"
+                    fontSize="12"
+                    fontWeight="700"
+                    fill={isDark ? '#F9FAFB' : '#111827'}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {name}
+                  </text>
+                  <text
+                    x={centerX}
+                    y={centerY + 12}
+                    textAnchor="middle"
+                    fontSize="11"
+                    fill={isDark ? '#E5E7EB' : '#6b7280'}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {pct}%
+                  </text>
+                </g>
+              );
+            })()
+          )}
         </svg>
       </div>
       {selectedCategory !== null && (
