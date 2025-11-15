@@ -14,6 +14,8 @@ export default function Dashboard() {
   const [latencyMs, setLatencyMs] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   // Initialize preferences from localStorage and apply theme
   useEffect(() => {
@@ -107,6 +109,125 @@ export default function Dashboard() {
     processFile(f);
   }
 
+  const handleFileUploadAndTrain = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+    setOutput(null);
+    setError(null);
+
+    try {
+      // Upload CSV and start training
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const uploadResponse = await fetch('http://localhost:8000/upload-and-retrain', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        // Try to extract detailed error text from the server response
+        let errText = null;
+        try { errText = await uploadResponse.text(); } catch (_) { errText = null; }
+        throw new Error(errText || 'Upload failed');
+      }
+
+      const uploadResult = await uploadResponse.json();
+      const jobId = uploadResult.job_id;
+
+      // Poll for training completion
+      let trainingComplete = false;
+      let attempts = 0;
+      const maxAttempts = 60; // 5 minutes max
+
+      while (!trainingComplete && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+
+        const statusResponse = await fetch(`http://localhost:8000/job-status/${jobId}`);
+        const statusResult = await statusResponse.json();
+
+        if (statusResult.status === 'succeeded') {
+          trainingComplete = true;
+          console.log('Training completed successfully');
+          
+          // Now run prediction
+          const predictResponse = await fetch('http://localhost:8000/predict-categories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ retrain: false }), // Models already trained
+          });
+
+          if (!predictResponse.ok) {
+          let errText = null;
+          try { errText = await predictResponse.text(); } catch (_) { errText = null; }
+          throw new Error(errText || 'Prediction failed');
+          }
+
+          const predictions = await predictResponse.json();
+          setOutput(predictions);
+          
+        } else if (statusResult.status === 'failed') {
+          throw new Error(statusResult.message || 'Training failed');
+        }
+
+        attempts++;
+      }
+
+      if (attempts >= maxAttempts) {
+        throw new Error('Training timeout - please check server logs');
+      }
+
+    } catch (err) {
+      setError(err.message);
+      console.error('Error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Validate CSV format: check required columns and minimum row count
+  function validateCSV(text) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      return { valid: false, error: "CSV must have at least a header row and one data row." };
+    }
+
+    const splitLine = (line) =>
+      line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(s => s.trim().replace(/^\"|\"$/g, ''));
+
+    const headers = splitLine(lines[0]).map(h => h.toLowerCase());
+    
+    // Check for URL column (flexible matching)
+    const hasURL = headers.some(h => h.includes('url') || h.includes('website') || h.includes('link') || h.includes('site'));
+    if (!hasURL) {
+      return { valid: false, error: "CSV must contain a 'url' column (or 'website', 'link', 'site')." };
+    }
+
+    // Check for visitCount and typedCount (needed for frecency calculation in training)
+    const hasVisitCount = headers.some(h => h.includes('visit'));
+    const hasTypedCount = headers.some(h => h.includes('typed'));
+    
+    if (!hasVisitCount || !hasTypedCount) {
+      return { 
+        valid: false, 
+        error: "CSV must contain 'visitCount' and 'typedCount' columns. These are required to calculate user interest (frecency) during training." 
+      };
+    }
+
+    // Check minimum data rows (backend needs at least 10 samples)
+    const dataRows = lines.length - 1;
+    if (dataRows < 10) {
+      return { 
+        valid: false, 
+        error: `Insufficient data: CSV has ${dataRows} data row${dataRows === 1 ? '' : 's'}, but at least 10 are required for training.` 
+      };
+    }
+
+    return { valid: true };
+  }
+
   // Process file and return a Promise that resolves to parsed URLs.
   // This lets callers await parsing (useful if Run is clicked immediately after upload).
   function processFile(f) {
@@ -120,6 +241,18 @@ export default function Dashboard() {
         let urls = [];
         const text = event.target.result || "";
         if (f.name.toLowerCase().endsWith('.csv')) {
+          // Validate CSV format before parsing
+          const validation = validateCSV(text);
+          if (!validation.valid) {
+            setUploadedFileName(null);
+            setUploadedFile(null);
+            setUploadedFileSize(null);
+            setUploadedURLs([]);
+            setParseError(validation.error);
+            resolve([]);
+            return;
+          }
+
           urls = parseCSV(text);
           if (!urls || urls.length === 0) {
             // clear uploaded file state and show parse error popup
@@ -128,6 +261,8 @@ export default function Dashboard() {
             setUploadedFileSize(null);
             setUploadedURLs([]);
             setParseError(`Uploaded file "${f.name}" appears invalid or is missing a URL column. Please check the file and try again.`);
+            resolve([]);
+            return;
           }
         } else if (f.name.toLowerCase().endsWith('.json')) {
           try {
@@ -145,6 +280,16 @@ export default function Dashboard() {
               setUploadedFileSize(null);
               setUploadedURLs([]);
               setParseError(`Uploaded JSON "${f.name}" did not contain any URL values. Please check the file and try again.`);
+              resolve([]);
+              return;
+            } else if (urls.length < 10) {
+              setUploadedFileName(null);
+              setUploadedFile(null);
+              setUploadedFileSize(null);
+              setUploadedURLs([]);
+              setParseError(`Insufficient data: JSON has ${urls.length} URLs, but at least 10 are required for training.`);
+              resolve([]);
+              return;
             }
           } catch (e) {
             // ignore parse errors, leave urls empty
@@ -154,6 +299,8 @@ export default function Dashboard() {
             setUploadedFileSize(null);
             setUploadedURLs([]);
             setParseError(`Uploaded JSON "${f.name}" could not be parsed. Please check the file and try again.`);
+            resolve([]);
+            return;
           }
         }
         setUploadedURLs(urls);
@@ -203,16 +350,20 @@ export default function Dashboard() {
   }
 
   async function runInference() {
+    console.debug('runInference: started');
     setProcessing(true);
     setOutput(null);
     setJobStatus({ status: 'starting', message: 'Initializing retrain...' });
     setLatencyMs(null);
     const tStart = performance.now();
     try {
+      console.debug('runInference: checking uploaded data', { uploadedFile, uploadedURLs });
       // If uploaded file exists but parsing hasn't completed, await it.
       if ((!uploadedURLs || uploadedURLs.length === 0) && uploadedFile) {
         // processFile returns a Promise that resolves with parsed URLs
+        console.debug('runInference: awaiting processFile for uploaded file');
         await processFile(uploadedFile);
+        console.debug('runInference: processFile completed', { uploadedURLs });
       }
 
       // If no uploaded data, prompt user and emit console messages for a short time
@@ -237,18 +388,50 @@ export default function Dashboard() {
         payload = { urls: uploadedURLs };
       }
 
-      // Start retraining asynchronously via /retrain, then poll job status
-      const retrainResp = await fetch('http://localhost:8000/retrain', { method: 'POST' });
-      const retrainJson = await retrainResp.json();
-      const jobId = retrainJson.job_id;
-      setJobStatus({ status: 'queued', message: 'Training queued', jobId });
+      // If the user uploaded a CSV file, POST it to /upload-and-retrain so
+      // the backend saves the exact CSV and trains on it. Otherwise call
+      // /retrain which will retrain using whatever server-side CSV exists.
+      let jobId = null;
+      if (uploadedFile) {
+        console.debug('runInference: POST /upload-and-retrain with uploaded file', uploadedFile.name);
+        const form = new FormData();
+        form.append('file', uploadedFile, uploadedFile.name);
+        const upResp = await fetch('http://localhost:8000/upload-and-retrain', { method: 'POST', body: form });
+        let upJson = null;
+        try {
+          upJson = await upResp.json();
+        } catch (e) {
+          console.error('runInference: failed to parse /upload-and-retrain response', e);
+          throw new Error('Failed to upload file for retraining');
+        }
+        console.debug('runInference: /upload-and-retrain response', upJson);
+        jobId = upJson.job_id;
+        setJobStatus({ status: upJson.status || 'queued', message: upJson.message || 'Training queued', jobId });
+      } else {
+        // Start retraining asynchronously via /retrain, then poll job status
+        console.debug('runInference: POST /retrain');
+        const retrainResp = await fetch('http://localhost:8000/retrain', { method: 'POST' });
+        let retrainJson = null;
+        try {
+          retrainJson = await retrainResp.json();
+        } catch (e) {
+          console.error('runInference: failed to parse /retrain JSON', e);
+          throw new Error('Failed to start retrain: invalid response from server');
+        }
+        console.debug('runInference: /retrain response', retrainJson);
+        jobId = retrainJson.job_id;
+        setJobStatus({ status: 'queued', message: 'Training queued', jobId });
+      }
 
       // Poll job status until succeeded/failed
       let finalStatus = null;
+      let lastStatusJson = null;
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
         const stResp = await fetch(`http://localhost:8000/job-status/${jobId}`);
         const stJson = await stResp.json();
+        console.debug('runInference: polled job status', stJson);
+        lastStatusJson = stJson;
         setJobStatus(stJson);
         if (stJson.status === 'succeeded') {
           finalStatus = 'succeeded';
@@ -261,16 +444,30 @@ export default function Dashboard() {
       }
 
       if (finalStatus !== 'succeeded') {
-        throw new Error('Training failed: ' + (jobStatus && jobStatus.message));
+        // Use the latest polled status message (not the React state variable which may be stale)
+        const msg = (lastStatusJson && lastStatusJson.message) || 'No details provided';
+        throw new Error('Training failed: ' + msg);
       }
 
       // Training succeeded — now call predict-categories (no retrain flag)
+      console.debug('runInference: POST /predict-categories', { payload });
       const response = await fetch("http://localhost:8000/predict-categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload || {}),
       });
-      const data = await response.json();
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (e) {
+        console.error('runInference: failed to parse /predict-categories response', e);
+        throw new Error('Prediction failed: invalid response from server');
+      }
+      console.debug('runInference: /predict-categories response', data);
+      // Backend may return { error: '...' } with 200; surface that to the user
+      if (data && data.error) {
+        throw new Error(data.error);
+      }
       
       // Filter and format results
       // Ensure the UI always shows the pseudonym the user entered and a consistent model version.
@@ -298,6 +495,7 @@ export default function Dashboard() {
       setLatencyMs(performance.now() - tStart);
     } catch (err) {
       console.error("Prediction error:", err);
+      setError(err.message);
       setOutput({ meta: { error: "Prediction failed: " + err.message }, categories: [] });
       setLatencyMs(null);
     } finally {
@@ -350,13 +548,40 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-container">
+      {error && (
+        <div style={{background: '#fee2e2', color: '#b91c1c', padding: '10px 16px', borderRadius: 6, margin: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+          <div style={{flex: 1}}><strong>Error:</strong> {error}</div>
+          <button onClick={() => setError(null)} style={{marginLeft: 12, background: 'transparent', border: 'none', cursor: 'pointer'}}>Dismiss</button>
+        </div>
+      )}
       {parseError && (
         <div style={{position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60}}>
-          <div style={{background: 'white', padding: 24, borderRadius: 8, maxWidth: 520, width: '90%', boxShadow: '0 10px 30px rgba(0,0,0,0.25)'}}>
-            <h3 style={{marginTop: 0}}>Invalid file</h3>
-            <p style={{marginBottom: 16}}>{parseError}</p>
+          <div style={{
+            background: darkMode ? '#1f2937' : 'white', 
+            padding: 24, 
+            borderRadius: 8, 
+            maxWidth: 520, 
+            width: '90%', 
+            boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+            color: darkMode ? '#f3f4f6' : '#111827'
+          }}>
+            <h3 style={{marginTop: 0, color: darkMode ? '#f9fafb' : '#111827'}}>Invalid file</h3>
+            <p style={{marginBottom: 16, color: darkMode ? '#e5e7eb' : '#374151'}}>{parseError}</p>
             <div style={{display: 'flex', justifyContent: 'flex-end'}}>
-              <button onClick={() => setParseError(null)} style={{padding: '8px 12px', borderRadius: 6, border: 'none', background: '#2563eb', color: 'white'}}>OK</button>
+              <button 
+                onClick={() => setParseError(null)} 
+                style={{
+                  padding: '8px 16px', 
+                  borderRadius: 6, 
+                  border: 'none', 
+                  background: '#2563eb', 
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+              >
+                OK
+              </button>
             </div>
           </div>
         </div>

@@ -8,7 +8,7 @@ from collections import Counter
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-# --- Class definition must be here to unpickle the model ---
+# --- Class definition here to unpickle the model ---
 class URLFeatureExtractor(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None): return self
     def transform(self, X):
@@ -25,8 +25,7 @@ class URLFeatureExtractor(BaseEstimator, TransformerMixin):
 
 # --- Configuration ---
 MODELS_DIR = "models"
-HISTORY_DATA_PATH = os.path.join("data", "TestingHistory.csv")
-MODEL_VERSION = "v1.2.0-dynamic-products" # Updated model version
+MODEL_VERSION = "v1.2.0-dynamic-products"
 USER_PSEUDONYM = "user_12345"
 
 # --- Helper Functions ---
@@ -61,8 +60,11 @@ def extract_keywords_with_counts(url_texts, top_n=15):
 # --- Main Prediction Logic ---
 def generate_interest_profile(urls: list = None):
     """
-    Generate interest profile. If `urls` is provided (list of url strings), use it.
-    Otherwise fall back to reading from HISTORY_DATA_PATH.
+    Generate interest profile. A list of URL strings must be provided via the
+    `urls` parameter. This function no longer falls back to a default
+    filesystem CSV path — the caller (for example the FastAPI endpoint) must
+    pass the URLs (e.g. from an uploaded CSV) to ensure predictions are made
+    from the intended user data.
     """
     print("Loading all models...")
     # Load all necessary model artifacts
@@ -77,18 +79,11 @@ def generate_interest_profile(urls: list = None):
         print("A required model is missing. Please run train scripts. Aborting.")
         return
 
-    # Load history either from provided urls or from the history CSV
+    # Require caller to provide URLs. Do not use a default CSV path here to
+    # avoid accidental use of stale or developer-local data.
     if urls is None:
-        print(f"Loading user history from {HISTORY_DATA_PATH}...")
-        try:
-            history_df = pd.read_csv(HISTORY_DATA_PATH)
-            history_df.dropna(subset=["url"], inplace=True)
-            urls = history_df["url"].astype(str).values
-        except FileNotFoundError:
-            print(f"Error: History data not found at {HISTORY_DATA_PATH}")
-            return
-    else:
-        print(f"Using {len(urls)} URLs passed in request for prediction.")
+        raise ValueError("No URLs provided. The prediction endpoint requires an uploaded CSV or a 'urls' list in the request.")
+    print(f"Using {len(urls)} URLs passed in request for prediction.")
 
     cleaned_urls_for_cat = basic_url_clean(urls)
 
@@ -165,5 +160,5 @@ def generate_interest_profile(urls: list = None):
     return final_output
 
 if __name__ == "__main__":
-    generate_interest_profile()
+    print("This script exposes generate_interest_profile(urls). Run via the FastAPI app or call the function with a list of URLs.")
 

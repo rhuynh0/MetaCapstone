@@ -119,6 +119,9 @@ body, .dashboard-container, .dashboard-content {
   @apply text-2xl font-bold;
   font-weight: 900; /* bold main page title */
 }
+.dark .header-title {
+  color: #ffffff;
+}
 .header-subtitle {
   @apply text-sm;
   color: var(--muted);
