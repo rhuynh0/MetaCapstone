@@ -21,7 +21,7 @@ html, body {
   --card-title: #1e1e1e; /* dark for card titles */
   --card-bg: rgba(255,255,255,0.78); /* translucent white for cards */
   --card-bg-weak: rgba(248,250,252,0.64);
-  --glass-bg: rgba(255, 255, 255, 0.673);
+  --glass-bg: rgba(255,255,255,0.42);
   --text: rgba(59, 59, 59, 0.95); /* dark text for cards */
   --muted: rgba(51, 51, 51, 0.75);
   --hr-color: #9e9e9e;
@@ -323,6 +323,10 @@ body, .dashboard-container, .dashboard-content {
   border-color: rgba(229,231,235,0.2);
 }
 .dark .settings-button svg { color: #e5e7eb; }
+
+.dark .header-title {
+  color: #ffffff;
+}
 
 .dark .text-input,
 .dark .textarea-input,
