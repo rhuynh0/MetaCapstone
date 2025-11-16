@@ -542,8 +542,10 @@ export default function Dashboard() {
 
   function copyJSONToClipboard() {
     if (!output) return;
-    navigator.clipboard &&
+    if (navigator.clipboard) {
       navigator.clipboard.writeText(JSON.stringify(output, null, 2));
+      window.alert('JSON copied to clipboard');
+    }
   }
 
   return (
@@ -682,11 +684,9 @@ export default function Dashboard() {
 
               {uploadedFileName ? (
                 <div className="upload-info">
-                  <div className="upload-name">{uploadedFileName}</div>
+                  <div className="upload-name" title={uploadedFileName}>{uploadedFileName}</div>
                   <div className="upload-meta">{formatBytes(uploadedFileSize)}</div>
-                  <button className="remove-button" onClick={removeUploadedFile}>
-                    Remove
-                  </button>
+                  <button className="remove-button" onClick={removeUploadedFile} aria-label="Remove file">Remove</button>
                 </div>
               ) : (
                 <div className="file-status">No file selected</div>

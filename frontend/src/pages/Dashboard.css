@@ -212,14 +212,15 @@ body, .dashboard-container, .dashboard-content {
 .browse-link { color:var(--primary); text-decoration:underline; }
 .upload-hint { font-size:12px; color:var(--muted); }
 
-.upload-info { display:flex; align-items:baseline; gap:12px; margin-top:10px; }
-.upload-name { font-weight:600; }
+.upload-info { display:flex; align-items:center; gap:12px; margin-top:10px; width:100%; overflow:hidden; }
+.upload-name { font-weight:600; flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .upload-meta { font-size:12px; color:var(--muted); }
 .remove-button {
   @apply rounded-lg px-3 py-1 text-sm;
   background: rgba(255,255,255,0.9);
   border: 1px solid rgba(15,23,42,0.20);
   cursor: pointer;
+  flex-shrink:0;
 }
 .remove-button:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(2,6,23,0.06); }
 .file-status {
