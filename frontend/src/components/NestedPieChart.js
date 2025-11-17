@@ -42,6 +42,30 @@ export default function NestedPieChart({ categories }) {
     };
   };
 
+  // Calculate label positions with collision avoidance (force-directed layout)
+  const labelPositions = useMemo(() => {
+    let angleOffset = 0;
+    const positions = chartData.map((cat, idx) => {
+      const angle = (cat.likelihood / total) * 360;
+      const midAngle = angleOffset + angle / 2;
+      angleOffset += angle;
+      
+      const labelRadius = outerRadius + 25; // balanced distance - closer but with spacing
+      const initialPos = polarToCartesian(centerX, centerY, labelRadius, midAngle);
+      
+      return {
+        idx,
+        initialPos,
+        midAngle,
+        angle,
+        boxWidth: Math.max(cat.name.length * 6 + 32, Math.round(cat.likelihood * 100).toString().length * 8 + 32),
+        boxHeight: 36
+      };
+    });
+
+    return positions;
+  }, [chartData, total, centerX, centerY, outerRadius]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
@@ -51,69 +75,47 @@ export default function NestedPieChart({ categories }) {
           viewBox={`0 0 ${width} ${height}`}
           style={{ overflow: 'visible' }}
         >
-          {/* Outer ring - Categories */}
+          {/* Outer ring - Categories (just the segments, no labels yet) */}
           {chartData.map((cat, idx) => {
             const angle = (cat.likelihood / total) * 360;
             const startAngle = outerOffset;
             const endAngle = outerOffset + angle;
             outerOffset = endAngle;
 
-            const midAngle = (startAngle + endAngle) / 2;
-            // Place labels inside the ring so text length doesn't affect perceived centering
-            const labelRadius = outerRadius - 26;
-            const labelPos = polarToCartesian(centerX, centerY, labelRadius, midAngle);
+            const isSelected = selectedCategory === idx;
+            
+            // Scale radii outward when selected (creates expanding effect)
+            const popOutScale = isSelected ? 1.15 : 1.0;
+            const expandedOuterRadius = outerRadius * popOutScale;
+            const expandedInnerRadius = innerRadius * popOutScale;
 
-            const outerStart = polarToCartesian(centerX, centerY, outerRadius, startAngle);
-            const outerEnd = polarToCartesian(centerX, centerY, outerRadius, endAngle);
-            const innerStart = polarToCartesian(centerX, centerY, innerRadius, startAngle);
-            const innerEnd = polarToCartesian(centerX, centerY, innerRadius, endAngle);
+            const outerStart = polarToCartesian(centerX, centerY, expandedOuterRadius, startAngle);
+            const outerEnd = polarToCartesian(centerX, centerY, expandedOuterRadius, endAngle);
+            const innerStart = polarToCartesian(centerX, centerY, expandedInnerRadius, startAngle);
+            const innerEnd = polarToCartesian(centerX, centerY, expandedInnerRadius, endAngle);
             const largeArc = angle > 180 ? 1 : 0;
 
-            const isSelected = selectedCategory === idx;
-
             return (
-              <g key={idx}>
-                <path
-                  d={`M ${outerStart.x} ${outerStart.y}
-                      A ${outerRadius} ${outerRadius} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y}
-                      L ${innerEnd.x} ${innerEnd.y}
-                      A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}
-                      Z`}
-                  fill={cat.color}
-                  stroke="white"
-                  strokeWidth="2"
-                  opacity={selectedCategory === null || isSelected ? "0.9" : "0.4"}
-                  style={{ cursor: 'pointer', transition: 'opacity 0.2s' }}
-                  onMouseEnter={(e) => e.target.style.opacity = '1'}
-                  onMouseLeave={(e) => e.target.style.opacity = selectedCategory === null || isSelected ? '0.9' : '0.4'}
-                  onClick={() => setSelectedCategory(idx)}
-                />
-                <text
-                  x={labelPos.x}
-                  y={labelPos.y}
-                  textAnchor="middle"
-                  fontSize="13"
-                  fontWeight="600"
-                  fill="#ffffff"
-                  stroke="#000000"
-                  strokeWidth="2.0"
-                  style={{ pointerEvents: 'none', paintOrder: 'stroke' }}
-                >
-                  {cat.name}
-                </text>
-                <text
-                  x={labelPos.x}
-                  y={labelPos.y + 12}
-                  textAnchor="middle"
-                  fontSize="11"
-                  fill="#ffffff"
-                  stroke="#000000"
-                  strokeWidth="1.4"
-                  style={{ pointerEvents: 'none', paintOrder: 'stroke' }}
-                >
-                  {Math.round(cat.likelihood * 100)}%
-                </text>
-              </g>
+              <path
+                key={`segment-${idx}`}
+                d={`M ${outerStart.x} ${outerStart.y}
+                    A ${expandedOuterRadius} ${expandedOuterRadius} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y}
+                    L ${innerEnd.x} ${innerEnd.y}
+                    A ${expandedInnerRadius} ${expandedInnerRadius} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}
+                    Z`}
+                fill={cat.color}
+                stroke="white"
+                strokeWidth="2"
+                opacity={selectedCategory === null || isSelected ? "0.9" : "0.4"}
+                style={{ 
+                  cursor: 'pointer', 
+                  transition: 'all 0.3s ease',
+                  transformOrigin: `${centerX}px ${centerY}px`
+                }}
+                onMouseEnter={(e) => e.target.style.opacity = '1'}
+                onMouseLeave={(e) => e.target.style.opacity = selectedCategory === null || isSelected ? '0.9' : '0.4'}
+                onClick={() => setSelectedCategory(idx)}
+              />
             );
           })}
 
@@ -204,10 +206,7 @@ export default function NestedPieChart({ categories }) {
             })
           )}
 
-          {/* Inner area is covered by the center circle below */}
-
-          {/* Center circle */
-          }
+          {/* Center circle */}
           <circle
             cx={centerX}
             cy={centerY}
@@ -246,6 +245,112 @@ export default function NestedPieChart({ categories }) {
                   </text>
                 </g>
               );
+            })()
+          )}
+
+          {/* Category labels and boxes - rendered last so they appear on top */}
+          {labelPositions.map((labelInfo) => {
+            const isSelected = selectedCategory === labelInfo.idx;
+            // Only show labels when no category is selected, OR show the selected category's label
+            if (selectedCategory !== null && !isSelected) return null;
+            
+            const cat = chartData[labelInfo.idx];
+            const labelPos = labelInfo.initialPos;
+            const boxWidth = labelInfo.boxWidth;
+            const boxHeight = labelInfo.boxHeight;
+
+            return (
+              <g key={`label-${labelInfo.idx}`}>
+                {/* Light blue background box for label readability - dynamically sized */}
+                <rect
+                  x={labelPos.x - boxWidth / 2}
+                  y={labelPos.y - boxHeight / 2}
+                  width={boxWidth}
+                  height={boxHeight}
+                  fill="#dbeafe"
+                  stroke="#93c5fd"
+                  strokeWidth="1"
+                  rx="4"
+                  opacity="0.95"
+                  style={{ pointerEvents: 'none' }}
+                />
+                <text
+                  x={labelPos.x}
+                  y={labelPos.y}
+                  textAnchor="middle"
+                  fontSize="13"
+                  fontWeight="600"
+                  fill="#1f2937"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {cat.name}
+                </text>
+                <text
+                  x={labelPos.x}
+                  y={labelPos.y + 12}
+                  textAnchor="middle"
+                  fontSize="11"
+                  fill="#6b7280"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {Math.round(cat.likelihood * 100)}%
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Product labels in inner ring (when a category is selected) */}
+          {selectedCategory !== null && chartData[selectedCategory] && (
+            (() => {
+              const cat = chartData[selectedCategory];
+              const productTotal = cat.products.reduce((sum, p) => sum + p.likelihood, 0);
+              if (!productTotal || cat.products.length === 1) return null;
+              
+              let productOffset = 0;
+              return cat.products.map((product, pIdx) => {
+                const val = product.likelihood || 0;
+                if (val <= 0) return null;
+                let productAngle = (val / productTotal) * 360;
+                if (productAngle <= 0.01) return null;
+                
+                const startAngle = productOffset;
+                const endAngle = startAngle + productAngle;
+                productOffset = endAngle;
+                
+                const midAngle = (startAngle + endAngle) / 2;
+                const labelRadius = (innerRadius + innerInnerRadius) / 2;
+                const labelPos = polarToCartesian(centerX, centerY, labelRadius, midAngle);
+                
+                return (
+                  <g key={`product-label-${pIdx}`}>
+                    <text
+                      x={labelPos.x}
+                      y={labelPos.y}
+                      textAnchor="middle"
+                      fontSize="11"
+                      fontWeight="600"
+                      fill="#ffffff"
+                      stroke="#000000"
+                      strokeWidth="1"
+                      style={{ pointerEvents: 'none', paintOrder: 'stroke' }}
+                    >
+                      {product.name}
+                    </text>
+                    <text
+                      x={labelPos.x}
+                      y={labelPos.y + 10}
+                      textAnchor="middle"
+                      fontSize="10"
+                      fill="#ffffff"
+                      stroke="#000000"
+                      strokeWidth="0.8"
+                      style={{ pointerEvents: 'none', paintOrder: 'stroke' }}
+                    >
+                      {Math.round(val * 100)}%
+                    </text>
+                  </g>
+                );
+              });
             })()
           )}
         </svg>
