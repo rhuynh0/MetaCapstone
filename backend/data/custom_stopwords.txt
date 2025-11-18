@@ -1,0 +1,43 @@
+# One word per line. Lines starting with # are comments.
+# Add general, non-informative tokens you want to ignore.
+# Examples below are already also in code defaults; keep here to tweak easily.
+
+google
+gmail
+mail
+youtube
+facebook
+twitter
+instagram
+reddit
+amazon
+
+login
+signin
+signup
+logout
+account
+profile
+privacy
+terms
+policy
+cookies
+cookie
+subscribe
+unsubscribe
+contact
+support
+home
+about
+blog
+search
+
+www
+http
+https
+com
+net
+org
+index
+email
+inbox
