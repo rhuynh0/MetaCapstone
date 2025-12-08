@@ -1,4 +1,4 @@
-# MetaCapstone: Browsing Interest Profiler
+# MetaCapstone AdApt: Adaptive Ad and Activity Insights Platform
 
 A lightweight, interpretable ML system that transforms raw browsing history into personalized interest score profiles and product recommendations.
 
